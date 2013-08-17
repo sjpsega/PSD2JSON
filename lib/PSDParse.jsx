@@ -18,8 +18,10 @@ PSDParse.prototype = {
     init:function(){
         this.docs = app.documents;
         this.activeDoc = app.activeDocument;
+        this.allArtLayers = [];
         this.visibleArtLayers = [];
         this.specialLayers = [];
+        this.handledLayers = [];
         this.textLayers = [];
         this.functionArtLayerInfos = [];
         this.groupingArray = [];
@@ -30,9 +32,8 @@ PSDParse.prototype = {
     parse:function(){
         var savedState = this.activeDoc.activeHistoryState;
         this.dealWithSpecialLayoutSet(this.activeDoc);
+        this.findAllArtLayers(this.activeDoc);
         this.findAllVisibleArtLayers(this.activeDoc);
-        this.contentLayers = [];
-        this.handledLayers = [];
         this.specialLayers = this.getSpecialLayers();
         this.textLayers = this.findTextLayer();
         $.writeln("parse visibleArtLayers:",this.visibleArtLayers.length);
@@ -43,14 +44,12 @@ PSDParse.prototype = {
         this.orderGrouping();
         this.groupingByArea();
         this.makeDomModel();
-        this.sliceAndExport();
+        this.insertHerfInfo();
+        this.sliceAndExportBG();
         this.rootDom.analyseLayer();
         this.rootDom.removeLayer();
-        this.transPos();
         this.saveJSONFile();
-        $.writeln("end-------");
-        $.writeln("end-------:\n",JSON.stringify(this.rootDom));
-        // this.uploadData();
+        this.uploadData();
         //TODO:这里恢复历史，可能会报错
         this.activeDoc.activeHistoryState = savedState;
     },
@@ -69,18 +68,22 @@ PSDParse.prototype = {
             }
         });
     },
-    findAllVisibleArtLayers:function(layersParent){
+    findAllArtLayers:function(layersParent){
         var layers = layersParent.layers;
         var self = this;
         _.each(layers,function(layer){
-            if(layer.visible){
-                if(layer.typename == "ArtLayer"){
-                    self.visibleArtLayers.push(layer);
-                }else if(layer.typename == "LayerSet"){
-                    self.findAllVisibleArtLayers(layer);
-                }
+            if(layer.typename == "ArtLayer"){
+                self.allArtLayers.push(layer);
+            }else if(layer.typename == "LayerSet"){
+                self.findAllArtLayers(layer);
             }
         });
+    },
+    findAllVisibleArtLayers:function(layersParent){
+        var self = this;
+        self.visibleArtLayers = _.filter(self.allArtLayers,function(layer){
+                                                            return layer.visible
+                                                        });
     },
     isSpecialLayer:function(name){
         var reg = /^#/;
@@ -142,12 +145,11 @@ PSDParse.prototype = {
         //     $.writeln("spec:",JSON.stringify(item));
         // });
     },
-    whileInt:0,
     grouping:function(){
         var self = this;
         var maxHeightLayerInfo,resultArr;
         // $.writeln("parse functionArtLayerInfos-----:",this.functionArtLayerInfos.length);
-        while(this.functionArtLayerInfos.length>0 && self.whileInt<15){
+        while(this.functionArtLayerInfos.length>0){
             // $.writeln("parse functionArtLayerInfos:",this.functionArtLayerInfos.length);
             maxHeightLayerInfo = self.findMaxHeightLayerInfo();
             self.removeInfos([maxHeightLayerInfo]);
@@ -156,7 +158,6 @@ PSDParse.prototype = {
             // $.writeln("parse resultArr-----:",resultArr.length);
             self.removeInfos(resultArr);
             self.groupingArray.push(resultArr);
-            self.whileInt++;
         }
         // $.writeln("parse grouping:",self.groupingArray.length,this.functionArtLayerInfos.length,self.whileInt);
         // _.each(self.groupingArray,function(item){
@@ -240,9 +241,18 @@ PSDParse.prototype = {
         });
     },
     makeDomModel:function(){
-        this.rootDom = new DomModel();
         var idx = 0,orderInfo,layerInfo;
         var self = this;
+        layerInfo = {
+                    name:this.activeDoc.name,
+                    style:{
+                        x:0,
+                        y:0,
+                        width:this.activeDoc.width.value,
+                        height:this.activeDoc.height.value
+                    }
+                }
+        this.rootDom = new DomModel(layerInfo);
         _.each(this.orderGroupingArray,function(group){
             orderInfo = self.orderGroupingInfos[idx];
             var groupDom = new DomModel(orderInfo);
@@ -264,31 +274,43 @@ PSDParse.prototype = {
         });
         // $.writeln("makeDomModel:",JSON.stringify(self.rootDom));
     },
-    sliceAndExport: function(){
+    insertHerfInfo:function(){
+        var self = this;
+        var hrefLayer = _.find(this.allArtLayers,function(layer){
+                                                return _.string.trim(layer.name)  === "#href"; 
+                                            });
+        if(hrefLayer){
+            try{
+                var layerInfo = {
+                        name:hrefLayer.name,
+                        text:hrefLayer.textItem.contents
+                    }
+                var hrefDom = new DomModel(layerInfo);
+                self.rootDom.addChild(hrefDom);
+            }catch(e){
+                $writeln($.fileName, $.line, e , "insertHerfInfo function");
+            }
+        }
+    },
+    sliceAndExportBG: function(){
         var contentLayers = this.textLayers.concat(this.specialLayers);
         PSD.layer.hideLayers(contentLayers);
         
-        var region = [],imgInfo,idx = 0;
+        var region = [],imgInfo;
         var self = this;
         // try{
-        _.each(this.rootDom.children,function(domModel){
-            region = domModel.getRegion();
-            if(!region){
-                $.writeln(domModel.name," region is null");
-                return;
-            }
-            imgInfo = {
-                name:"bg_slice_"+idx
-            };
-            imgInfo = PSD.selection.exportSelectionToImg(region, imgInfo);
-            domModel.style.background = {
-                image:imgInfo.name
-            };
-            // _slices.push({index:idx, type:"ArtLayer", visible:true, kind:"LayerKind.NORMAL", isBackgroundLayer:false,
-            //     name:'slice_'+_index+'.'+extension});
-            idx++;
-        });
-            // selection.deselect();
+        region = self.rootDom.getRegion();
+        if(!region){
+            $.writeln(self.rootDom.name," region is null");
+            return;
+        }
+        imgInfo = {
+            name:"bg"
+        };
+        imgInfo = PSD.selection.exportSelectionToImg(region, imgInfo);
+        self.rootDom.style.background = {
+            image:imgInfo.name
+        };
         // }catch(e){
             // $.util.log($.fileName, $.line, e , layer.name);
         //     $.writeln($.fileName, $.line, e);
@@ -296,9 +318,18 @@ PSDParse.prototype = {
         PSD.layer.showLayers(contentLayers);
     },
     saveJSONFile:function(){
-        PSD.file.write("/Users/apple/Desktop/slices/json.txt",JSON.stringify(this.rootDom));
+        var savaJSON = {
+            author:"sa",
+            fileName:this.activeDoc.name,
+            dom:this.rootDom
+        };
+        PSD.file.write("/Users/apple/Desktop/slices/json.txt",JSON.stringify(savaJSON));
+        $.writeln("end-------");
+        $.writeln("end-------:\n",JSON.stringify(savaJSON));
     },
     uploadData:function(){
+        $.writeln("uploadData....");
+        $.writeln("uploadData....");
         var from = 'shandan';
         var list = PSD.file.getFilesList("/Users/apple/Desktop/slices/",[".DS_Store"]);
         var files = {}, name;
@@ -308,13 +339,12 @@ PSDParse.prototype = {
         }
         var options = {
             dataType:"POST",
-            url:"http://preview.fd.com/upload",
-            port:3000,
+            url:"http://10.16.40.20/upload",
+            // url:"http://preview.fd.com/upload",
+            port:2000,
             data:{from:from},
             files:files //{index: File("d:\\psd2html\\test00\\index.html"), slice_325: File("d:\\psd2html\\test00\\slices\\slice_325.jpg")}
         };
-        $.writeln("uploadData....");
-        $.writeln("uploadData....");
         $.writeln("uploadData....",JSON.stringify(options));
         PSD.net.connect(options);
     }
