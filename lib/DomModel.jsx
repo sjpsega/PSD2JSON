@@ -53,12 +53,13 @@ DomModel.prototype = {
         }
     },
     _analyseLayer:function(){
+        this.name = _.string.trim(this.name).replace(/^#/,'');
         if(this.layer){
-            var layerName = _.string.trim(this.name);
-            if(_.string.startsWith(layerName,"#a")){
+            var layerName = this.name;
+            if(_.string.startsWith(layerName,"a")){
                 this._dealALink();
             }
-            if(_.string.startsWith(layerName,"#img")){
+            if(_.string.startsWith(layerName,"img")){
                 this._dealImg();
             }
             if(this.layer.kind.toString() === "LayerKind.TEXT"){
@@ -98,7 +99,9 @@ DomModel.prototype = {
         if(!this.style.background){
             this.style.background = {};
         }
-        this.style.background.image = imgInfo.name;
+        if(imgInfo){
+            this.style.background.image = imgInfo.name;
+        }
     },
     _dealTxt:function(){
         this.text = this.layer.textItem.contents;

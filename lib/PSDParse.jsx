@@ -49,7 +49,7 @@ PSDParse.prototype = {
         this.rootDom.analyseLayer();
         this.rootDom.removeLayer();
         this.saveJSONFile();
-        this.uploadData();
+        // this.uploadData();
         //TODO:这里恢复历史，可能会报错
         this.activeDoc.activeHistoryState = savedState;
     },
@@ -308,6 +308,9 @@ PSDParse.prototype = {
             name:"bg"
         };
         imgInfo = PSD.selection.exportSelectionToImg(region, imgInfo);
+        if(!imgInfo){
+            return;
+        }
         self.rootDom.style.background = {
             image:imgInfo.name
         };

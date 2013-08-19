@@ -65,8 +65,14 @@ PSD.selection = {
         // copy selected area
         var selection = app.activeDocument.selection, xset = [], yset = [];
         selection.select(region);
-        selection.copy(true);
-        
+
+        //若复制区域为空，会报错
+        try{
+            selection.copy(true);
+        }catch(e){
+            return;
+        }
+
         for(var i = 0, l = region.length; i < l; i++){
             xset.push(region[i][0]);
             yset.push(region[i][1]);
